@@ -16,49 +16,57 @@ type responseInfo struct {
 	duration time.Duration
 }
 
-type summaryInfo struct {
-	requested int64
-	responded int64
-}
-
 func main() {
+	// Parse arguments
 	requests := flag.Int64("n", 1, "Number of requests to perform")
 	concurrency := flag.Int64("c", 1, "Number of multiple requests to make at a time")
-	fmt.Println(requests, concurrency)
 	flag.Parse()
 	if flag.NArg() == 0 || *requests == 0 || *requests < *concurrency {
 		flag.PrintDefaults()
 		os.Exit(-1)
 	}
 	link := flag.Arg(0)
-	c := make(chan responseInfo)
-	summary := summaryInfo{}
-	for i := int64(0); i < *concurrency; i++ {
-		summary.requested++
-		go checkLink(link, c)
+	fmt.Println(*requests, *concurrency)
+
+	// Create pools
+	jobs := make(chan string, *requests)
+	results := make(chan responseInfo)
+	for j := int64(1); j <= *requests; j++ {
+		jobs <- link
+	}
+	close(jobs)
+
+	for i := int64(1); i <= *concurrency; i++ {
+		go worker(i, jobs, results)
 	}
 
-	for response := range c {
-		if summary.requested < *requests {
-			summary.requested++
-			go checkLink(link, c)
-		}
-		summary.responded++
+	count := int64(0)
+	for response := range results {
 		fmt.Println(response)
-		if summary.responded == summary.requested {
+		count++
+		if (count >= *requests) {
 			break
 		}
 	}
 }
 
-func checkLink(link string, c chan responseInfo) {
+func worker(workerId int64, jobs <- chan string, results chan <- responseInfo) {
+	for j := range jobs {
+		fmt.Println("worker", workerId, "started job", j)
+		response := checkLink(j)
+		fmt.Println("worker", workerId, "finished job", j)
+		results <- response
+	}
+}
+
+func checkLink(link string) responseInfo {
 	start := time.Now()
 	res, err := http.Get(link)
 	if err != nil {
 		panic(err)
 	}
 	read, _ := io.Copy(ioutil.Discard, res.Body)
-	c <- responseInfo{
+	return responseInfo{
 		status: res.StatusCode,
 		bytes: read,
 		duration: time.Now().Sub(start),
